@@ -245,6 +245,25 @@ Want to tweak the AI's voice, brain, or how it listens? Modify the Python files 
 
 ---
 
+## AI Dev Tooling 🤖✂️
+
+This repo ships a token-reduction toolchain for the AI dev workflow (we run
+Claude Code via [happy](https://happy.engineering)). It cuts token usage on
+every session with **rtk** (compresses CLI/tool output) and **headroom** (a
+local context-compression proxy).
+
+One command sets it all up on a fresh machine:
+
+```bash
+./ai-tools/setup.sh        # installs + wires rtk, docker, headroom (idempotent)
+./ai-tools/happy-hr.sh     # launch happy routed through the compressor
+```
+
+See [`ai-tools/README.md`](ai-tools/README.md) for which tools we use, why, and
+how they hook in.
+
+---
+
 ## Contributing 🤝
 
 Got ideas or found a bug? Contributions are welcome! Feel free to open issues or submit pull requests.
