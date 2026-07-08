@@ -22,6 +22,11 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 import happy_bridge
 import happy_llm
 import summarizer
+import voice_state
+import data_events
+import logging
+
+logger = logging.getLogger("voice_agent")
 
 WHISPER_MODEL = "base.en"
 KOKORO_VOICE = "af_heart"
@@ -140,6 +145,48 @@ async def entrypoint(ctx: JobContext):
 
     ctx.room.on("participant_disconnected", _on_participant_disconnected)
 
+    state = voice_state.VoiceState()
+
+    # Seed focus + summary cache from the most-recently-active session at
+    # connect time (v1 initial behaviour). Never crash the agent on a list
+    # failure — falls back to newest-active in resolve_session_id.
+    try:
+        active = happy_bridge.active_sessions_with_summary()
+        for s in active:
+            state.set_summary(s["id"], s["summary"])
+        if active:
+            state.set_focus(active[0]["id"])  # newest-active (v1 initial)
+    except Exception as e:
+        logger.warning("seeding focus/summary failed: %s", e)
+
+    # Data-channel dispatcher: phone → bridge structured messages.
+    # Handler NEVER crashes the agent; bad payloads are logged + ignored.
+    async def _on_data_received(payload: bytes, participant, topic, qp):
+        try:
+            ev = data_events.parse(payload)
+            if ev is None:
+                return
+            if isinstance(ev, data_events.FocusEvent):
+                state.set_focus(ev.session_id)
+                logger.info("focus → %s", ev.session_id)
+                # Refresh summary cache on focus (cheap, focus is rare).
+                try:
+                    for s in happy_bridge.active_sessions_with_summary():
+                        state.set_summary(s["id"], s["summary"])
+                except Exception as e:
+                    logger.warning("summary refresh on focus failed: %s", e)
+            elif isinstance(ev, data_events.CompleteEvent):
+                if ev.session_id == state.focused_session_id:
+                    return  # user is looking at it; suppress double-speak
+                summary = state.get_summary(ev.session_id) or ""
+                ping = (f"Your {summary} session finished."
+                        if summary else "A background session finished.")
+                await session.say(ping)
+        except Exception as e:
+            logger.warning("data_received handler error: %s", e)
+
+    ctx.room.on("data_received", _on_data_received)
+
     session = AgentSession(
         stt=WhisperSTT(model=ctx.proc.userdata["whisper"]),
         llm=happy_llm.HappyBridgeLLM(
@@ -148,6 +195,7 @@ async def entrypoint(ctx: JobContext):
             fetch_last_reply=happy_bridge.fetch_last_reply,
             summarize=summarizer.summarize,
             session_override=os.environ.get("VOICE_SESSION_ID") or None,
+            voice_state=state,
         ),
         tts=KokoroTTS(pipeline=ctx.proc.userdata["kokoro"]),
     )

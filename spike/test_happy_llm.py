@@ -26,7 +26,7 @@ def _ctx(user_text):
 def test_happy_llm_speaks_summary_of_reply():
     calls = {}
     llm = happy_llm.HappyBridgeLLM(
-        resolve_session=lambda override=None: "sid1",
+        resolve_session=lambda override=None, focused=None: "sid1",
         send_and_wait=lambda sid, text: calls.setdefault("sent", (sid, text)),
         fetch_last_reply=lambda sid: "Committed everything and opened PR 12.",
         summarize=lambda reply: "Committed and opened a PR.",
@@ -37,7 +37,7 @@ def test_happy_llm_speaks_summary_of_reply():
 
 
 def test_happy_llm_speaks_error_on_happy_agent_failure():
-    def boom(override=None):
+    def boom(override=None, focused=None):
         raise hb.HappyAgentError("no active Claude session found")
     llm = happy_llm.HappyBridgeLLM(
         resolve_session=boom,
@@ -55,7 +55,7 @@ def test_happy_llm_speaks_fallback_on_unexpected_error():
     def boom(sid):
         raise ValueError("Expecting value: line 1 column 1")
     llm = happy_llm.HappyBridgeLLM(
-        resolve_session=lambda override=None: "sid1",
+        resolve_session=lambda override=None, focused=None: "sid1",
         send_and_wait=lambda sid, text: None,
         fetch_last_reply=boom,
         summarize=lambda reply: "unused",
@@ -67,7 +67,7 @@ def test_happy_llm_speaks_fallback_on_unexpected_error():
 def test_happy_llm_uses_session_override():
     seen = {}
     llm = happy_llm.HappyBridgeLLM(
-        resolve_session=lambda override=None: seen.setdefault("override", override) or "resolved",
+        resolve_session=lambda override=None, focused=None: seen.setdefault("override", override) or "resolved",
         send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
         fetch_last_reply=lambda sid: "ok",
         summarize=lambda reply: "ok spoken",
@@ -75,3 +75,35 @@ def test_happy_llm_uses_session_override():
     )
     _collect(llm, _ctx("hi"))
     assert seen["override"] == "forced-sid"
+
+
+
+# --- v2: voice_state focused routing ---
+
+def test_happy_llm_uses_focused_from_voice_state():
+    seen = {}
+    state = type("S", (), {"focused_session_id": "focus-sid"})
+    llm = happy_llm.HappyBridgeLLM(
+        resolve_session=lambda override=None, focused=None: seen.setdefault("foc", focused) or "sid",
+        send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
+        fetch_last_reply=lambda sid: "ok",
+        summarize=lambda reply: "ok spoken",
+        voice_state=state,
+    )
+    _collect(llm, _ctx("hi"))
+    assert seen["foc"] == "focus-sid"
+
+
+def test_happy_llm_override_beats_focused():
+    seen = {}
+    state = type("S", (), {"focused_session_id": "focus-sid"})
+    llm = happy_llm.HappyBridgeLLM(
+        resolve_session=lambda override=None, focused=None: seen.setdefault("ov", override) or "sid",
+        send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
+        fetch_last_reply=lambda sid: "ok",
+        summarize=lambda reply: "ok spoken",
+        session_override="forced-sid",
+        voice_state=state,
+    )
+    _collect(llm, _ctx("hi"))
+    assert seen["ov"] == "forced-sid"

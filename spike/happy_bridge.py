@@ -40,11 +40,13 @@ def check_auth():
     return os.path.isfile(AGENT_KEY_PATH)
 
 
-def resolve_session_id(run=_default_run, override=None):
-    """Return the target session id: the override if given, else the
+def resolve_session_id(run=_default_run, override=None, focused=None):
+    """Return the target session id. Priority: override → focused →
     most-recently-active session (max activeAt)."""
     if override:
         return override
+    if focused:
+        return focused
     sessions = json.loads(run(["list", "--active", "--json"]))
     if not sessions:
         raise HappyAgentError("no active Claude session found")
@@ -53,6 +55,24 @@ def resolve_session_id(run=_default_run, override=None):
         reverse=True,
     )
     return sessions[0]["id"]
+
+
+def active_sessions_with_summary(run=_default_run):
+    """Return [{id, summary, activeAt}] for active sessions, newest-active
+    first. summary is metadata.summary.text or ''. activeAt is the session's
+    activeAt (or updatedAt fallback, or 0). Seeds/refreshes voice_state."""
+    sessions = json.loads(run(["list", "--active", "--json"]))
+    out = []
+    for s in sessions:
+        meta = s.get("metadata") or {}
+        summary = (meta.get("summary") or {}).get("text") or ""
+        out.append({
+            "id": s["id"],
+            "summary": summary,
+            "activeAt": s.get("activeAt") or s.get("updatedAt") or 0,
+        })
+    out.sort(key=lambda x: x["activeAt"], reverse=True)
+    return out
 
 
 def send_and_wait(session_id, text, run=_default_run):

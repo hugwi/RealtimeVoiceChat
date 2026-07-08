@@ -103,3 +103,62 @@ def test_fetch_last_reply_empty_when_no_agent_text():
     def run(args):
         return json.dumps(messages)
     assert hb.fetch_last_reply("sid1", run=run) == ""
+
+
+# --- v2: focused-session priority ---
+
+def test_resolve_session_id_uses_focused_without_override():
+    def run(args):
+        raise AssertionError("run should not be called when focused given and no override")
+    assert hb.resolve_session_id(run=run, focused="focus-sid") == "focus-sid"
+
+
+def test_resolve_session_id_override_beats_focused():
+    def run(args):
+        raise AssertionError("run should not be called when override given")
+    assert hb.resolve_session_id(run=run, override="over", focused="focus") == "over"
+
+
+def test_resolve_session_id_focused_beats_newest_active():
+    sessions = [{"id": "newest", "activeAt": 500}]
+    def run(args):
+        return json.dumps(sessions)
+    assert hb.resolve_session_id(run=run, focused="focus") == "focus"
+
+
+def test_resolve_session_id_newest_when_both_none():
+    sessions = [
+        {"id": "old", "activeAt": 100},
+        {"id": "new", "activeAt": 500},
+    ]
+    def run(args):
+        assert args == ["list", "--active", "--json"]
+        return json.dumps(sessions)
+    assert hb.resolve_session_id(run=run) == "new"
+
+
+# --- v2: active_sessions_with_summary ---
+
+def test_active_sessions_with_summary_parses_metadata():
+    sessions = [
+        {"id": "A", "metadata": {"summary": {"text": "Fix the bug"}}},
+        {"id": "B", "metadata": {"summary": {"text": "Ship the PR"}}},
+    ]
+    def run(args):
+        assert args == ["list", "--active", "--json"]
+        return json.dumps(sessions)
+    out = hb.active_sessions_with_summary(run=run)
+    by_id = {x["id"]: x["summary"] for x in out}
+    assert by_id == {"A": "Fix the bug", "B": "Ship the PR"}
+
+
+def test_active_sessions_with_summary_missing_summary_is_empty():
+    sessions = [
+        {"id": "A", "metadata": {}},
+        {"id": "B"},
+    ]
+    def run(args):
+        return json.dumps(sessions)
+    out = hb.active_sessions_with_summary(run=run)
+    by_id = {x["id"]: x["summary"] for x in out}
+    assert by_id == {"A": "", "B": ""}
