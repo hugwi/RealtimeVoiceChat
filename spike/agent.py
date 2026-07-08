@@ -1,10 +1,13 @@
-"""LiveKit spike agent: whisper STT + Kokoro TTS + ollama brain.
+"""LiveKit spike agent: whisper STT + Kokoro TTS, bridged to a Claude Code
+session via happy-agent (see happy_llm.HappyBridgeLLM). ollama is used only
+by summarizer.py to compress Claude's replies for speech.
 
 Run:
   console (local mic/speaker):   python spike/agent.py console
   room (browser via playground): python spike/agent.py dev
 """
 import asyncio
+import os
 import threading
 import numpy as np
 
@@ -15,12 +18,14 @@ from livekit.agents import (
 )
 from livekit.agents.worker import JobExecutorType
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
-from livekit.plugins import openai
+
+import happy_bridge
+import happy_llm
+import summarizer
 
 WHISPER_MODEL = "base.en"
 KOKORO_VOICE = "af_heart"
 KOKORO_SR = 24000
-OLLAMA_MODEL = "qwen2.5:3b"
 
 # Models loaded once at startup in a background thread; jobs never wait for cold load.
 _models_ready = threading.Event()
@@ -137,14 +142,27 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(
         stt=WhisperSTT(model=ctx.proc.userdata["whisper"]),
-        llm=openai.LLM(model=OLLAMA_MODEL, base_url="http://localhost:11434/v1", api_key="ollama"),
+        llm=happy_llm.HappyBridgeLLM(
+            resolve_session=happy_bridge.resolve_session_id,
+            send_and_wait=happy_bridge.send_and_wait,
+            fetch_last_reply=happy_bridge.fetch_last_reply,
+            summarize=summarizer.summarize,
+            session_override=os.environ.get("VOICE_SESSION_ID") or None,
+        ),
         tts=KokoroTTS(pipeline=ctx.proc.userdata["kokoro"]),
     )
     await session.start(
-        agent=Agent(instructions="You are a local voice assistant. Reply in one or two short sentences."),
+        agent=Agent(instructions="You are a voice bridge to a Claude Code session."),
         room=ctx.room,
     )
-    await session.generate_reply(instructions="Greet the user briefly and say the local voice spike is live.")
+
+    if not happy_bridge.check_auth():
+        await session.say(
+            "Voice bridge is not authenticated. Run happy-agent auth login on the host."
+        )
+        return
+
+    await session.say("Voice bridge live. What should Claude do?")
 
 
 if __name__ == "__main__":
