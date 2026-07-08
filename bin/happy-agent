@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec node /home/hyggan/happy-src/packages/happy-agent/bin/happy-agent.mjs "$@"
