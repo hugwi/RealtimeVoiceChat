@@ -1,0 +1,253 @@
+---
+title: "Voice → Claude Bridge v2 — Focus-Aware Sessions"
+slug: voice-claude-bridge-v2
+kind: recap
+localOnly: true
+brief: "v2 makes voice route to the phone's focused Claude session instead of the newest-active guess, and speaks a one-liner when a background session finishes. Box side only — degrades to v1 until the APK ships structured data-channel messages."
+---
+
+<Callout id="recap-scope" tone="info">
+
+**Scope:** the three commits on `feat/voice-claude-bridge` above `d852408` — v2 design spec, implementation plan, and the box-side implementation. The Happy **app** side (`RealtimeVoiceSession.tsx`, `voiceHooks.ts`, `types.ts`) is deliberately **not** included; it needs an APK rebuild and the bridge degrades gracefully until it ships.
+
+</Callout>
+
+The v1 bridge pipes voice to Claude via `happy-agent`, but targets the **newest-active** session — with multiple sessions it sprays across them per utterance and can hit the control session. v1 mitigates by pinning one `VOICE_SESSION_ID`. The real fix: the **phone knows focus, the box does not**. v2 gets the focused-session id from the phone over the existing LiveKit data channel so voice routes to the session the user is looking at, plus a **completion ping** when a background session finishes.
+
+The decision was **Route B** — the Happy app `publishData`s two structured message types (`focused_session`, `session_complete`) the Python agent consumes. Rejected: parsing existing human-readable focus strings (brittle), polling `happy-agent status` (races, latency). Voice-approve permissions stay out of scope — `happy-agent` has no `allow`/`deny` CLI.
+
+<Diagram id="arch-flow" caption="v2 data flow: phone publishes focus/complete over the LiveKit data channel; the bridge routes and pings. HTML/CSS layout, renderer tokens.">
+
+```html
+<div class="diagram-panel" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%">
+  <div class="diagram-card" data-rough style="padding:12px;display:flex;flex-direction:column;gap:8px">
+    <div class="diagram-pill" style="align-self:flex-start">Phone app</div>
+    <div class="diagram-node">onSessionFocus(id)</div>
+    <div class="diagram-muted">publishData<br/>{type:'focused_session', sessionId}</div>
+    <div class="diagram-node">onReady(id)</div>
+    <div class="diagram-muted">publishData<br/>{type:'session_complete', sessionId}</div>
+  </div>
+  <div class="diagram-card" data-rough style="padding:12px;display:flex;flex-direction:column;gap:8px">
+    <div class="diagram-pill" style="align-self:flex-start">Python agent / box</div>
+    <div class="diagram-node">data_received → data_events.parse</div>
+    <div class="diagram-muted">FocusEvent → voice_state.set_focus</div>
+    <div class="diagram-muted">CompleteEvent → speak ping (background only)</div>
+    <div class="diagram-node">[user speaks] → resolve_session_id<br/>(override → focused → newest-active)</div>
+    <div class="diagram-muted">happy-agent send → history → summarizer → Kokoro TTS</div>
+  </div>
+</div>
+```
+
+```css
+.diagram-panel { border: 1.4px solid var(--wf-line); border-radius: var(--wf-radius); padding: 14px; }
+.diagram-card { border: 1.4px solid var(--wf-line); border-radius: 8px; background: var(--wf-card); }
+.diagram-node { border: 1.4px solid var(--wf-line); border-radius: 6px; padding: 6px 8px; background: var(--wf-paper); }
+.diagram-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1.4px solid var(--wf-accent); color: var(--wf-accent); }
+.diagram-muted { color: var(--wf-muted); font-size: 12px; }
+```
+
+</Diagram>
+
+### Session-targeting contract
+
+The core behavioural change is a new resolution priority. Voice now routes to `override → focused → newest-active` instead of v1's `override → newest-active`. The `focused` id comes from the phone's `focused_session` data-channel message and lives in a shared `VoiceState` object on the agent's event loop.
+
+<Columns id="resolve-before-after">
+<Column id="resolve-before-col" label="Before (v1)">
+
+```python
+def resolve_session_id(run=_default_run, override=None):
+    """the override if given, else the most-recently-active session."""
+    if override:
+        return override
+    sessions = json.loads(run(["list", "--active", "--json"]))
+    ...
+    return sessions[0]["id"]
+```
+
+</Column>
+<Column id="resolve-after-col" label="After (v2)">
+
+```python
+def resolve_session_id(run=_default_run, override=None, focused=None):
+    """override → focused → most-recently-active session."""
+    if override:
+        return override
+    if focused:
+        return focused
+    sessions = json.loads(run(["list", "--active", "--json"]))
+    ...
+    return sessions[0]["id"]
+```
+
+</Column>
+</Columns>
+
+A completion ping fires only for a **background** session (one whose id ≠ the focused id) to avoid double-speak — if the user is looking at it, the v1 reply path already speaks the turn result. Failures are graceful: no focus received → newest-active fallback; malformed data message → logged + ignored; old APK that never sends the new types → v1 behaviour unchanged.
+
+### Compatibility notes
+
+- **`resolve_session_id` signature widened** with a `focused=None` kwarg — backwards compatible; v1 callers omitting it get the newest-active path. The two `happy_llm` tests that called `resolve_session` via `lambda override=None` were widened to `lambda override=None, focused=None` to accept the new kwarg.
+- **`HappyBridgeLLM.__init__` gains `voice_state=None`** — optional, so existing constructions without it still work (focused resolves to `None` → newest-active).
+- **`active_sessions_with_summary` return shape** carries `activeAt` and is sorted newest-first — single `happy-agent list` call per seed/refresh instead of two.
+
+<FileTree
+  id="files-touched"
+  title="Files touched"
+  entries={[
+    { path: "spike/voice_state.py", change: "added", note: "Shared focused_session_id + summary_cache (single event loop, no locks)." },
+    { path: "spike/data_events.py", change: "added", note: "Isolated parser: FocusEvent / CompleteEvent / None. Never raises." },
+    { path: "spike/happy_bridge.py", change: "modified", note: "resolve_session_id gains focused param; new active_sessions_with_summary()." },
+    { path: "spike/happy_llm.py", change: "modified", note: "HappyBridgeLLM accepts voice_state; passes focused into resolve_session." },
+    { path: "spike/agent.py", change: "modified", note: "Seeds focus on connect; data_received dispatcher (focus + completion ping)." },
+    { path: "spike/test_voice_state.py", change: "added", note: "5 tests — focus, summary cache, last-write-wins." },
+    { path: "spike/test_data_events.py", change: "added", note: "9 tests — valid/invalid/malformed payloads, bytes input." },
+    { path: "spike/test_happy_bridge.py", change: "modified", note: "+6 tests: focused priority, summary parsing." },
+    { path: "spike/test_happy_llm.py", change: "modified", note: "+2 tests: voice_state routing, override beats focused." },
+    { path: "docs/superpowers/specs/2026-07-08-voice-claude-bridge-v2-design.md", change: "added", note: "Approved design spec." },
+    { path: "docs/superpowers/plans/2026-07-08-voice-claude-bridge-v2.md", change: "added", note: "Phased implementation plan." },
+  ]}
+/>
+
+## Key changes
+
+<TabsBlock
+  id="key-changes"
+  tabs={[
+    {
+      id: "tab-data-events",
+      label: "spike/data_events.py",
+      blocks: [
+        {
+          id: "tab-data-events-diff",
+          type: "annotated-code",
+          data: {
+            filename: "spike/data_events.py",
+            language: "python",
+            code: "\"\"\"Isolated parser for structured LiveKit data-channel messages.\n\nThe ONLY place that knows the wire format between the Happy app and the voice\nbridge. parse() never raises — bad/unknown/missing-field payloads yield None.\n\"\"\"\nimport json\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass FocusEvent:\n    session_id: str\n\n\n@dataclass\nclass CompleteEvent:\n    session_id: str\n\n\ndef parse(raw: bytes) -> FocusEvent | CompleteEvent | None:\n    \"\"\"Decode a data-channel payload into an Event, or None on any malformed\n    input. Never raises.\"\"\"\n    try:\n        payload = json.loads(raw)\n    except (ValueError, TypeError):\n        return None\n    if not isinstance(payload, dict):\n        return None\n    t = payload.get(\"type\")\n    sid = payload.get(\"sessionId\")\n    if not isinstance(sid, str) or not sid:\n        return None\n    if t == \"focused_session\":\n        return FocusEvent(session_id=sid)\n    if t == \"session_complete\":\n        return CompleteEvent(session_id=sid)\n    return None",
+            annotations: [
+              { lines: "10-17", label: "Two event types", note: "FocusEvent and CompleteEvent are the only wire messages the app sends in v2." },
+              { lines: "20-22", label: "Never raises", note: "Bad JSON, unknown type, or missing/empty sessionId → None. Keeps the data_received handler crash-proof." },
+              { lines: "27-28", label: "Non-dict guard", note: "Top-level JSON arrays/strings/primitives are rejected before field access." },
+              { lines: "31-32", label: "String + non-empty", note: "Wrong-typed (e.g. numeric) or empty sessionId yields None; the handler ignores it." },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: "tab-resolve",
+      label: "happy_bridge.resolve_session_id",
+      blocks: [
+        {
+          id: "tab-resolve-diff",
+          type: "diff",
+          data: {
+            filename: "spike/happy_bridge.py",
+            language: "python",
+            mode: "split",
+            before: "def resolve_session_id(run=_default_run, override=None):\n    \"\"\"Return the target session id: the override if given, else the\n    most-recently-active session (max activeAt).\"\"\"\n    if override:\n        return override\n    sessions = json.loads(run([\"list\", \"--active\", \"--json\"]))\n    if not sessions:\n        raise HappyAgentError(\"no active Claude session found\")\n    sessions.sort(\n        key=lambda s: s.get(\"activeAt\") or s.get(\"updatedAt\") or 0,\n        reverse=True,\n    )\n    return sessions[0][\"id\"]",
+            after: "def resolve_session_id(run=_default_run, override=None, focused=None):\n    \"\"\"Return the target session id. Priority: override → focused →\n    most-recently-active session (max activeAt).\"\"\"\n    if override:\n        return override\n    if focused:\n        return focused\n    sessions = json.loads(run([\"list\", \"--active\", \"--json\"]))\n    if not sessions:\n        raise HappyAgentError(\"no active Claude session found\")\n    sessions.sort(\n        key=lambda s: s.get(\"activeAt\") or s.get(\"updatedAt\") or 0,\n        reverse=True,\n    )\n    return sessions[0][\"id\"]",
+            summary: "New focused param: override → focused → newest-active priority; v1 path preserved when both None.",
+            annotations: [
+              { side: "after", lines: "3", label: "Priority order", note: "VOICE_SESSION_ID override still wins for the pinned-session deployment; focused fills the gap when not pinned." },
+              { side: "after", lines: "5-6", label: "Skips list", note: "When focused is set, no happy-agent list subprocess fires — one fewer round-trip per utterance." },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: "tab-summary-helper",
+      label: "active_sessions_with_summary",
+      blocks: [
+        {
+          id: "tab-summary-helper-code",
+          type: "annotated-code",
+          data: {
+            filename: "spike/happy_bridge.py",
+            language: "python",
+            code: "def active_sessions_with_summary(run=_default_run):\n    \"\"\"Return [{id, summary, activeAt}] for active sessions, newest-active\n    first. summary is metadata.summary.text or ''. activeAt is the session's\n    activeAt (or updatedAt fallback, or 0). Seeds/refreshes voice_state.\"\"\"\n    sessions = json.loads(run([\"list\", \"--active\", \"--json\"]))\n    out = []\n    for s in sessions:\n        meta = s.get(\"metadata\") or {}\n        summary = (meta.get(\"summary\") or {}).get(\"text\") or \"\"\n        out.append({\n            \"id\": s[\"id\"],\n            \"summary\": summary,\n            \"activeAt\": s.get(\"activeAt\") or s.get(\"updatedAt\") or 0,\n        })\n    out.sort(key=lambda x: x[\"activeAt\"], reverse=True)\n    return out",
+            annotations: [
+              { lines: "6", label: "One list call", note: "Replaces the v1 connect-time two-call pattern (list then re-list for sorting) with a single happy-agent list subprocess." },
+              { lines: "8-9", label: "Metadata path", note: "Reads metadata.summary.text from the happy-agent session JSON; missing → empty string so ping text has a cached-or-generic fallback." },
+              { lines: "12", label: "Newest-first", note: "Sorted by activeAt desc so agent.py can pick active[0] as the initial focus (v1 behaviour preserved)." },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: "tab-happy-llm",
+      label: "spike/happy_llm.py",
+      blocks: [
+        {
+          id: "tab-happy-llm-diff",
+          type: "diff",
+          data: {
+            filename: "spike/happy_llm.py",
+            language: "python",
+            mode: "split",
+            before: "class HappyBridgeLLM(LLM):\n    def __init__(self, *, resolve_session, send_and_wait, fetch_last_reply,\n                 summarize, session_override=None):\n        super().__init__()\n        ...\n        self._session_override = session_override\n\n    ...\n    def _blocking_bridge(self):\n        impl = self._llm_impl\n        session_id = impl._resolve_session(override=impl._session_override)\n        impl._send_and_wait(session_id, self._user_text)\n        reply = impl._fetch_last_reply(session_id)\n        return impl._summarize(reply)",
+            after: "class HappyBridgeLLM(LLM):\n    def __init__(self, *, resolve_session, send_and_wait, fetch_last_reply,\n                 summarize, session_override=None, voice_state=None):\n        super().__init__()\n        ...\n        self._session_override = session_override\n        self._voice_state = voice_state\n\n    ...\n    def _blocking_bridge(self):\n        impl = self._llm_impl\n        focused = (impl._voice_state.focused_session_id\n                   if impl._voice_state else None)\n        session_id = impl._resolve_session(\n            override=impl._session_override, focused=focused,\n        )\n        impl._send_and_wait(session_id, self._user_text)\n        reply = impl._fetch_last_reply(session_id)\n        return impl._summarize(reply)",
+            summary: "LLM reads focus from voice_state and passes it into resolve_session; voice_state=None degrades to v1.",
+            annotations: [
+              { side: "after", lines: "3", label: "Optional injection", note: "voice_state defaults None — existing/test constructions stay valid; focused simply resolves to None." },
+              { side: "after", lines: "10-11", label: "Read focus", note: "Guarded so a missing voice_state (tests, v1 wiring) doesn't AttributeError." },
+              { side: "after", lines: "12-14", label: "Kwarg call", note: "resolve_session now called with focused=…; the bridge-side resolve_session_id accepts it (Phase 3)." },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: "tab-agent",
+      label: "spike/agent.py dispatcher",
+      blocks: [
+        {
+          id: "tab-agent-code",
+          type: "annotated-code",
+          data: {
+            filename: "spike/agent.py",
+            language: "python",
+            code: "state = voice_state.VoiceState()\n\n    # Seed focus + summary cache from the most-recently-active session at\n    # connect time (v1 initial behaviour). Never crash the agent on a list\n    # failure — falls back to newest-active in resolve_session_id.\n    try:\n        active = happy_bridge.active_sessions_with_summary()\n        for s in active:\n            state.set_summary(s[\"id\"], s[\"summary\"])\n        if active:\n            state.set_focus(active[0][\"id\"])  # newest-active (v1 initial)\n    except Exception as e:\n        logger.warning(\"seeding focus/summary failed: %s\", e)\n\n    # Data-channel dispatcher: phone → bridge structured messages.\n    # Handler NEVER crashes the agent; bad payloads are logged + ignored.\n    async def _on_data_received(payload: bytes, participant, topic, qp):\n        try:\n            ev = data_events.parse(payload)\n            if ev is None:\n                return\n            if isinstance(ev, data_events.FocusEvent):\n                state.set_focus(ev.session_id)\n                logger.info(\"focus → %s\", ev.session_id)\n                # Refresh summary cache on focus (cheap, focus is rare).\n                try:\n                    for s in happy_bridge.active_sessions_with_summary():\n                        state.set_summary(s[\"id\"], s[\"summary\"])\n                except Exception as e:\n                    logger.warning(\"summary refresh on focus failed: %s\", e)\n            elif isinstance(ev, data_events.CompleteEvent):\n                if ev.session_id == state.focused_session_id:\n                    return  # user is looking at it; suppress double-speak\n                summary = state.get_summary(ev.session_id) or \"\"\n                ping = (f\"Your {summary} session finished.\"\n                        if summary else \"A background session finished.\")\n                await session.say(ping)\n        except Exception as e:\n            logger.warning(\"data_received handler error: %s\", e)\n\n    ctx.room.on(\"data_received\", _on_data_received)",
+            annotations: [
+              { lines: "4-11", label: "Seed on connect", note: "Single happy-agent list call seeds both the summary cache and the initial focus (newest-active); wrapped so a list failure never kills the agent." },
+              { lines: "16-17", label: "Parse + ignore", note: "data_events.parse yields None for anything unrecognized — the handler returns early and never touches state." },
+              { lines: "18-23", label: "Focus refresh", note: "On a FocusEvent the summary cache is refreshed from one fresh list call — keeps ping text current when sessions change between focus moves." },
+              { lines: "24-29", label: "Background-only ping", note: "CompleteEvent for the focused session is suppressed (no talk-over the reply the user is already hearing). Cache miss → generic 'A background session finished.'" },
+              { lines: "31-32", label: "Outer guard", note: "Whole handler wrapped in try/except — any unexpected failure is logged, never propagated. The agent cannot be killed by a bad data message." },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: "tab-voice-state",
+      label: "spike/voice_state.py",
+      blocks: [
+        {
+          id: "tab-voice-state-code",
+          type: "annotated-code",
+          data: {
+            filename: "spike/voice_state.py",
+            language: "python",
+            code: "class VoiceState:\n    def __init__(self):\n        self.focused_session_id = None\n        self.summary_cache = {}  # {session_id: summary_text}\n\n    def set_focus(self, session_id):\n        self.focused_session_id = session_id\n\n    def set_summary(self, session_id, text):\n        if session_id:\n            self.summary_cache[session_id] = text\n\n    def get_summary(self, session_id):\n        return self.summary_cache.get(session_id)",
+            annotations: [
+              { lines: "1-5", label: "No locks", note: "Single asyncio event loop owns all access — no threading.Lock needed. One instance per agent job." },
+              { lines: "9-10", label: "Defensive set", note: "set_summary(None, ...) is a no-op so a malformed event can't poison the cache with a None key." },
+            ],
+          },
+        },
+      ],
+    },
+  ]}
+/>
+
+### Verification
+
+39/39 pytest green (v1's 17 + 22 v2 new). The voice-agent systemd service restarted clean with the v2 code — worker registered, whisper + kokoro loaded, no traceback. The pre-existing `torio`/FFmpeg `libavutil.so` warnings are unrelated environmental noise the agent has always run under.
+
+### Not in this recap (intentional)
+
+The Happy app side — `RealtimeVoiceSession.tsx`/`.web.tsx` (`sendStructuredMessage`), `voiceHooks.ts` (`onSessionFocus`/`onReady` emit), `types.ts` (`VoiceSession` interface) — is **not** implemented here. It needs an APK rebuild and is tracked as Phase 6 of the plan. Until it ships, the box degrades to v1 newest-active behaviour with no focus or completion-ping messages arriving. Deferred backlog items #6 (streaming + acknowledgment) and #7 (turn detection / endpointing) are also out of scope.

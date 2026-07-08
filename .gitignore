@@ -11,3 +11,5 @@ logs/
 # Large downloaded binaries (fetch via setup, don't track)
 bin/livekit-server
 bin/*.tar.gz
+.agent-native/plans/*/.plan-url
+.agent-native/plans/*/.plan-state.json
