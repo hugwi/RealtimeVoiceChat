@@ -173,3 +173,33 @@ Full reply visible in the Happy chat on the phone (authoritative).
 
 - Rebuilding session persistence, encryption, or session lifecycle — Happy owns
   these; the bridge must never duplicate them.
+
+## Deferred — v2 voice-UX refinements (backlog)
+
+Captured from live testing of v1. Not yet scheduled.
+
+1. **Conversational streaming + acknowledgment.** v1 does `happy-agent send
+   --wait` → summarize → speak, so the agent goes silent during the whole
+   turn then dumps one summary — feels "shunted". Restore the streaming feel:
+   - Immediate acknowledgment when a request is received ("okay, let me look
+     into that").
+   - Detect longer/research tasks and set expectation ("I need to research
+     this, give me a moment"), then deliver when ready.
+   - Stream Claude's incoming text events progressively rather than one final
+     blob; let the user keep talking while responses stream in.
+   - Technical direction: `send` without `--wait`, poll/stream the session's
+     text events (the `ev` stream) and speak incrementally with interruptible
+     TTS; reconsider whether the mandatory summarizer applies to streaming
+     turns.
+
+2. **Turn detection / endpointing.** v1 sometimes terminates too quickly — cuts
+   the user off and misjudges end-of-speech. Investigate LiveKit VAD/endpointing
+   tuning (`endpointing_delay`, `unlikely_threshold` — logs show an eot
+   threshold of 0.36) and/or a simpler interaction model (push-to-talk,
+   explicit end phrase / wake-word, longer silence window). Also review session
+   `close_on_disconnect` / premature termination.
+
+3. **Session targeting (already a known v1 gap).** v1 pins one session via
+   `VOICE_SESSION_ID` because newest-active sprays across sessions (and can hit
+   the control session). v2's focus-aware design (phone sends the focused
+   session id) is the real fix.
