@@ -49,6 +49,21 @@ def test_happy_llm_speaks_error_on_happy_agent_failure():
     assert "session" in out.lower()
 
 
+def test_happy_llm_speaks_fallback_on_unexpected_error():
+    # A non-HappyAgentError (e.g. malformed JSON from happy-agent) must still
+    # produce spoken output, never silence.
+    def boom(sid):
+        raise ValueError("Expecting value: line 1 column 1")
+    llm = happy_llm.HappyBridgeLLM(
+        resolve_session=lambda override=None: "sid1",
+        send_and_wait=lambda sid, text: None,
+        fetch_last_reply=boom,
+        summarize=lambda reply: "unused",
+    )
+    out = _collect(llm, _ctx("do something"))
+    assert out.strip() != ""
+
+
 def test_happy_llm_uses_session_override():
     seen = {}
     llm = happy_llm.HappyBridgeLLM(

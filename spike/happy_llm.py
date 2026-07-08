@@ -1,12 +1,15 @@
 """A LiveKit LLM whose 'completion' is: forward the user's turn to a Claude
 Code session via happy-agent, then speak a summary of Claude's reply."""
 import asyncio
+import logging
 import uuid
 
 from livekit.agents.llm import LLM, LLMStream, ChatChunk, ChoiceDelta
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 
 from happy_bridge import HappyAgentError
+
+logger = logging.getLogger("happy_llm")
 
 
 def _last_user_text(chat_ctx):
@@ -65,6 +68,11 @@ class _HappyStream(LLMStream):
             )
         except HappyAgentError as e:
             spoken = f"Sorry, I couldn't reach the coding session: {e}."
+        except Exception as e:
+            # Any other failure (e.g. malformed happy-agent output) must still
+            # speak something — never leave the user with silence.
+            logger.exception("happy bridge turn failed")
+            spoken = "Sorry, something went wrong talking to the coding session. Check the chat."
         self._event_ch.send_nowait(
             ChatChunk(
                 id=str(uuid.uuid4()),
