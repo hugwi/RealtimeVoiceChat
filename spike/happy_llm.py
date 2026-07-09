@@ -63,7 +63,9 @@ class _HappyStream(LLMStream):
         )
         impl._send_and_wait(session_id, self._user_text)
         reply = impl._fetch_last_reply(session_id)
-        return impl._summarize(reply)
+        # Pass the user's request so the summary adapts to it: concise by default,
+        # deeper when the user asked to "dive into the code", "explain", etc.
+        return impl._summarize(reply, self._user_text)
 
 
     async def _run(self):

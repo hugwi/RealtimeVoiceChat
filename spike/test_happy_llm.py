@@ -29,7 +29,7 @@ def test_happy_llm_speaks_summary_of_reply():
         resolve_session=lambda override=None, focused=None: "sid1",
         send_and_wait=lambda sid, text: calls.setdefault("sent", (sid, text)),
         fetch_last_reply=lambda sid: "Committed everything and opened PR 12.",
-        summarize=lambda reply: "Committed and opened a PR.",
+        summarize=lambda reply, req=None: "Committed and opened a PR.",
     )
     out = _collect(llm, _ctx("commit and open a PR"))
     assert calls["sent"] == ("sid1", "commit and open a PR")
@@ -43,7 +43,7 @@ def test_happy_llm_speaks_error_on_happy_agent_failure():
         resolve_session=boom,
         send_and_wait=lambda sid, text: None,
         fetch_last_reply=lambda sid: "",
-        summarize=lambda reply: "unused",
+        summarize=lambda reply, req=None: "unused",
     )
     out = _collect(llm, _ctx("do something"))
     assert "session" in out.lower()
@@ -58,7 +58,7 @@ def test_happy_llm_speaks_fallback_on_unexpected_error():
         resolve_session=lambda override=None, focused=None: "sid1",
         send_and_wait=lambda sid, text: None,
         fetch_last_reply=boom,
-        summarize=lambda reply: "unused",
+        summarize=lambda reply, req=None: "unused",
     )
     out = _collect(llm, _ctx("do something"))
     assert out.strip() != ""
@@ -70,7 +70,7 @@ def test_happy_llm_uses_session_override():
         resolve_session=lambda override=None, focused=None: seen.setdefault("override", override) or "resolved",
         send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
         fetch_last_reply=lambda sid: "ok",
-        summarize=lambda reply: "ok spoken",
+        summarize=lambda reply, req=None: "ok spoken",
         session_override="forced-sid",
     )
     _collect(llm, _ctx("hi"))
@@ -87,7 +87,7 @@ def test_happy_llm_uses_focused_from_voice_state():
         resolve_session=lambda override=None, focused=None: seen.setdefault("foc", focused) or "sid",
         send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
         fetch_last_reply=lambda sid: "ok",
-        summarize=lambda reply: "ok spoken",
+        summarize=lambda reply, req=None: "ok spoken",
         voice_state=state,
     )
     _collect(llm, _ctx("hi"))
@@ -101,7 +101,7 @@ def test_happy_llm_override_beats_focused():
         resolve_session=lambda override=None, focused=None: seen.setdefault("ov", override) or "sid",
         send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
         fetch_last_reply=lambda sid: "ok",
-        summarize=lambda reply: "ok spoken",
+        summarize=lambda reply, req=None: "ok spoken",
         session_override="forced-sid",
         voice_state=state,
     )

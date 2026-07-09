@@ -8,10 +8,17 @@ OLLAMA_API_KEY = "ollama"
 DEFAULT_MODEL = "qwen2.5:3b"
 
 SYSTEM_PROMPT = (
-    "You turn a coding agent's reply into a short spoken summary. "
-    "Summarize ONLY what is stated. Never add facts, numbers, or names that "
+    "You are the spoken voice of a coding agent, reading its reply aloud to the "
+    "user. You are given the USER'S REQUEST and the agent's full reply. Produce "
+    "what should be spoken back.\n"
+    "Default to a concise two or three sentence summary of what the agent did or "
+    "found. BUT adapt to the user's request: if they asked to go deeper, explain "
+    "the code, walk through the reasoning, or hear more detail, give that detail "
+    "and be as long as needed — describe code in plain spoken English, never read "
+    "symbols or markdown aloud. "
+    "Summarize ONLY what the reply states; never add facts, numbers, or names that "
     "are not present. If the reply is unclear, say 'Check the chat for details.' "
-    "Keep it to two or three sentences, plain spoken English, no markdown."
+    "Plain spoken English, no markdown, no code fences."
 )
 
 _PLACEHOLDER = "Nothing to report. Check the chat for details."
@@ -28,17 +35,19 @@ def _truncate(text, max_sentences=3):
     return " ".join(parts[:max_sentences]).strip()
 
 
-def summarize(reply, *, client=None, model=DEFAULT_MODEL):
+def summarize(reply, user_request=None, *, client=None, model=DEFAULT_MODEL):
     if not reply or not reply.strip():
         return _PLACEHOLDER
     if client is None:
         client = _default_client()
+    request = (user_request or "").strip() or "(no specific request)"
+    user_content = f"USER'S REQUEST:\n{request}\n\nAGENT'S REPLY:\n{reply}"
     try:
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": reply},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.2,
         )
