@@ -185,7 +185,13 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.warning("data_received handler error: %s", e)
 
-    ctx.room.on("data_received", _on_data_received)
+    # .on() requires a SYNC callback; schedule the async handler as a task.
+    def _on_data_received_sync(data):
+        asyncio.create_task(
+            _on_data_received(data.data, data.participant, data.topic, None)
+        )
+
+    ctx.room.on("data_received", _on_data_received_sync)
 
     session = AgentSession(
         stt=WhisperSTT(model=ctx.proc.userdata["whisper"]),

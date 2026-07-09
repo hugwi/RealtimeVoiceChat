@@ -14,7 +14,7 @@ echo "=== Starting agent (ollama brain) ==="
 nohup env \
     LIVEKIT_URL=ws://localhost:7880 \
     LIVEKIT_API_KEY=devkey \
-    LIVEKIT_API_SECRET=secret \
+    LIVEKIT_API_SECRET=XhtHLb2P1O6vZBy5uuLEegDQFk-Tg6RcTbTZGzXm840 \
     "$REPO/venv/bin/python" "$SPIKE/agent.py" dev \
     >"$REPO/logs/lk-agent.log" 2>&1 &
 echo "agent pid $!"
@@ -22,7 +22,7 @@ echo "agent pid $!"
 echo "=== Starting token server on :8080 ==="
 nohup env \
     LIVEKIT_API_KEY=devkey \
-    LIVEKIT_API_SECRET=secret \
+    LIVEKIT_API_SECRET=XhtHLb2P1O6vZBy5uuLEegDQFk-Tg6RcTbTZGzXm840 \
     LIVEKIT_WS_URL="wss://hyggan-system-product-name.tail19f0b5.ts.net:10000" \
     "$REPO/venv/bin/python" "$SPIKE/token_server.py" \
     >"$REPO/logs/lk-tokens.log" 2>&1 &

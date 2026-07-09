@@ -9,4 +9,4 @@ rtc:
       - 192.168.1.0/24     # LAN — phone (react-native-webrtc doesn't enumerate Tailscale interface)
   enable_loopback_candidate: true   # local agent peer needs to reach itself
 keys:
-  devkey: secret
+  devkey: XhtHLb2P1O6vZBy5uuLEegDQFk-Tg6RcTbTZGzXm840

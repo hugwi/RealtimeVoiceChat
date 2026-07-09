@@ -9,7 +9,7 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 LIVEKIT_API_KEY = os.environ.get('LIVEKIT_API_KEY', 'devkey')
-LIVEKIT_API_SECRET = os.environ.get('LIVEKIT_API_SECRET', 'secret')
+LIVEKIT_API_SECRET = os.environ.get('LIVEKIT_API_SECRET', 'XhtHLb2P1O6vZBy5uuLEegDQFk-Tg6RcTbTZGzXm840')
 LIVEKIT_WS_URL = os.environ.get('LIVEKIT_WS_URL', 'wss://hyggan-system-product-name.tail19f0b5.ts.net:10000')
 PORT = int(os.environ.get('TOKEN_PORT', '8080'))
 

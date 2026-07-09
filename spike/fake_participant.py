@@ -12,7 +12,7 @@ LISTEN_S = 25.0
 
 
 async def main():
-    token = (api.AccessToken("devkey", "secret")
+    token = (api.AccessToken("devkey", "XhtHLb2P1O6vZBy5uuLEegDQFk-Tg6RcTbTZGzXm840")
              .with_identity("tester").with_name("tester")
              .with_grants(api.VideoGrants(room_join=True, room=ROOM)).to_jwt())
     room = rtc.Room()

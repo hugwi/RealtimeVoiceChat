@@ -21,7 +21,7 @@ sleep 2
 # 2. livekit-agents (STT + LLM + TTS)
 LIVEKIT_URL=ws://localhost:7880 \
 LIVEKIT_API_KEY=devkey \
-LIVEKIT_API_SECRET=secret \
+LIVEKIT_API_SECRET=XhtHLb2P1O6vZBy5uuLEegDQFk-Tg6RcTbTZGzXm840 \
 venv/bin/python spike/agent.py dev > /tmp/agent.log 2>&1 &
 echo "[2/4] Agent started (PID $!)"
 
