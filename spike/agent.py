@@ -24,6 +24,10 @@ import happy_llm
 import summarizer
 import voice_state
 import data_events
+import classifier
+import conversation
+import dispatcher as dispatcher_mod
+import delivery
 import logging
 
 logger = logging.getLogger("voice_agent")
@@ -193,17 +197,29 @@ async def entrypoint(ctx: JobContext):
 
     ctx.room.on("data_received", _on_data_received_sync)
 
+    dispatcher = dispatcher_mod.Dispatcher()
+
     session = AgentSession(
         stt=WhisperSTT(model=ctx.proc.userdata["whisper"]),
         llm=happy_llm.HappyBridgeLLM(
+            converse=conversation.converse,
+            classify=classifier.classify,
+            dispatcher=dispatcher,
             resolve_session=happy_bridge.resolve_session_id,
-            send_and_wait=happy_bridge.send_and_wait,
-            fetch_last_reply=happy_bridge.fetch_last_reply,
-            summarize=summarizer.summarize,
             session_override=os.environ.get("VOICE_SESSION_ID") or None,
             voice_state=state,
         ),
         tts=KokoroTTS(pipeline=ctx.proc.userdata["kokoro"]),
+    )
+
+    dispatcher.set_worker(
+        delivery.make_deliver(
+            send_and_wait=happy_bridge.send_and_wait,
+            fetch_last_reply=happy_bridge.fetch_last_reply,
+            summarize=summarizer.summarize,
+            say=session.say,
+            voice_state=state,
+        )
     )
     await session.start(
         agent=Agent(instructions="You are a voice bridge to a Claude Code session."),
