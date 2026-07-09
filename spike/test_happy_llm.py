@@ -2,11 +2,21 @@ import asyncio
 from livekit.agents.llm import ChatContext
 import happy_bridge as hb
 import happy_llm
+from classifier import Classification
+
+
+class _FakeDispatcher:
+    def __init__(self):
+        self.submitted = []
+
+    def set_worker(self, worker):
+        pass
+
+    def submit(self, payload):
+        self.submitted.append(payload)
 
 
 def _collect(llm, ctx):
-    # The LLMStream base spawns a metrics task in __init__, so .chat() must be
-    # called inside a running event loop.
     async def run():
         stream = llm.chat(chat_ctx=ctx)
         chunks = []
@@ -23,87 +33,134 @@ def _ctx(user_text):
     return ctx
 
 
-def test_happy_llm_speaks_summary_of_reply():
-    calls = {}
+class _State:
+    def __init__(self, focused=None):
+        self.focused_session_id = focused
+        self.transcript = []
+
+    def append_transcript(self, text, *, max_turns=20):
+        if text and text.strip():
+            self.transcript.append(text.strip())
+
+    def transcript_context(self):
+        return "\n".join(self.transcript)
+
+    def drain_transcript(self):
+        text = "\n".join(self.transcript)
+        self.transcript = []
+        return text
+
+
+def test_chitchat_speaks_reply_and_does_not_dispatch():
+    disp = _FakeDispatcher()
     llm = happy_llm.HappyBridgeLLM(
+        converse=lambda text, context="": "Doing well, what next?",
+        classify=lambda text, context="": Classification(is_task=False),
+        dispatcher=disp,
         resolve_session=lambda override=None, focused=None: "sid1",
-        send_and_wait=lambda sid, text: calls.setdefault("sent", (sid, text)),
-        fetch_last_reply=lambda sid: "Committed everything and opened PR 12.",
-        summarize=lambda reply, req=None: "Committed and opened a PR.",
+        voice_state=_State(),
     )
-    out = _collect(llm, _ctx("commit and open a PR"))
-    assert calls["sent"] == ("sid1", "commit and open a PR")
-    assert out == "Committed and opened a PR."
+    out = _collect(llm, _ctx("how are you"))
+    assert out == "Doing well, what next?"
+    assert disp.submitted == []
 
 
-def test_happy_llm_speaks_error_on_happy_agent_failure():
-    def boom(override=None, focused=None):
+def test_task_dispatches_and_speaks_ack():
+    disp = _FakeDispatcher()
+    state = _State()
+    llm = happy_llm.HappyBridgeLLM(
+        converse=lambda text, context="": "unused",
+        classify=lambda text, context="": Classification(is_task=True, instruction="commit and push"),
+        dispatcher=disp,
+        resolve_session=lambda override=None, focused=None: "sid1",
+        voice_state=state,
+    )
+    out = _collect(llm, _ctx("commit everything and push it"))
+    assert out == happy_llm.ACK
+    assert len(disp.submitted) == 1
+    p = disp.submitted[0]
+    assert p.session_id == "sid1"
+    assert p.instruction == "commit and push"
+    assert p.user_request == "commit everything and push it"
+    assert "commit everything and push it" in p.transcript
+
+
+def test_classify_failure_degrades_to_raw_task():
+    disp = _FakeDispatcher()
+
+    def boom_classify(text, context=""):
+        raise RuntimeError("ollama down")
+
+    llm = happy_llm.HappyBridgeLLM(
+        converse=lambda text, context="": "unused",
+        classify=boom_classify,
+        dispatcher=disp,
+        resolve_session=lambda override=None, focused=None: "sid1",
+        voice_state=_State(),
+    )
+    out = _collect(llm, _ctx("please refactor the auth module"))
+    assert out == happy_llm.ACK
+    assert len(disp.submitted) == 1
+    p = disp.submitted[0]
+    assert p.instruction == "please refactor the auth module"
+    assert "please refactor the auth module" in p.transcript
+
+
+def test_task_speaks_error_when_session_unresolvable():
+    disp = _FakeDispatcher()
+
+    def no_session(override=None, focused=None):
         raise hb.HappyAgentError("no active Claude session found")
+
     llm = happy_llm.HappyBridgeLLM(
-        resolve_session=boom,
-        send_and_wait=lambda sid, text: None,
-        fetch_last_reply=lambda sid: "",
-        summarize=lambda reply, req=None: "unused",
+        converse=lambda text, context="": "unused",
+        classify=lambda text, context="": Classification(is_task=True, instruction="do it"),
+        dispatcher=disp,
+        resolve_session=no_session,
+        voice_state=_State(),
     )
-    out = _collect(llm, _ctx("do something"))
+    out = _collect(llm, _ctx("do the thing"))
     assert "session" in out.lower()
+    assert disp.submitted == []
 
 
-def test_happy_llm_speaks_fallback_on_unexpected_error():
-    # A non-HappyAgentError (e.g. malformed JSON from happy-agent) must still
-    # produce spoken output, never silence.
-    def boom(sid):
-        raise ValueError("Expecting value: line 1 column 1")
+def test_empty_conversational_reply_falls_back():
+    disp = _FakeDispatcher()
     llm = happy_llm.HappyBridgeLLM(
+        converse=lambda text, context="": "",
+        classify=lambda text, context="": Classification(is_task=False),
+        dispatcher=disp,
         resolve_session=lambda override=None, focused=None: "sid1",
-        send_and_wait=lambda sid, text: None,
-        fetch_last_reply=boom,
-        summarize=lambda reply, req=None: "unused",
+        voice_state=_State(),
     )
-    out = _collect(llm, _ctx("do something"))
+    out = _collect(llm, _ctx("mm"))
     assert out.strip() != ""
 
 
-def test_happy_llm_uses_session_override():
+def test_task_uses_focused_session_from_voice_state():
+    disp = _FakeDispatcher()
     seen = {}
     llm = happy_llm.HappyBridgeLLM(
-        resolve_session=lambda override=None, focused=None: seen.setdefault("override", override) or "resolved",
-        send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
-        fetch_last_reply=lambda sid: "ok",
-        summarize=lambda reply, req=None: "ok spoken",
-        session_override="forced-sid",
+        converse=lambda text, context="": "unused",
+        classify=lambda text, context="": Classification(is_task=True, instruction="go"),
+        dispatcher=disp,
+        resolve_session=lambda override=None, focused=None: seen.setdefault("focused", focused) or "sid",
+        voice_state=_State(focused="focus-sid"),
     )
-    _collect(llm, _ctx("hi"))
+    _collect(llm, _ctx("go do it"))
+    assert seen["focused"] == "focus-sid"
+
+
+def test_task_override_passed_to_resolver():
+    disp = _FakeDispatcher()
+    seen = {}
+    llm = happy_llm.HappyBridgeLLM(
+        converse=lambda text, context="": "unused",
+        classify=lambda text, context="": Classification(is_task=True, instruction="go"),
+        dispatcher=disp,
+        resolve_session=lambda override=None, focused=None: seen.setdefault("override", override) or "sid",
+        session_override="forced-sid",
+        voice_state=_State(focused="focus-sid"),
+    )
+    _collect(llm, _ctx("go"))
     assert seen["override"] == "forced-sid"
-
-
-
-# --- v2: voice_state focused routing ---
-
-def test_happy_llm_uses_focused_from_voice_state():
-    seen = {}
-    state = type("S", (), {"focused_session_id": "focus-sid"})
-    llm = happy_llm.HappyBridgeLLM(
-        resolve_session=lambda override=None, focused=None: seen.setdefault("foc", focused) or "sid",
-        send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
-        fetch_last_reply=lambda sid: "ok",
-        summarize=lambda reply, req=None: "ok spoken",
-        voice_state=state,
-    )
-    _collect(llm, _ctx("hi"))
-    assert seen["foc"] == "focus-sid"
-
-
-def test_happy_llm_override_beats_focused():
-    seen = {}
-    state = type("S", (), {"focused_session_id": "focus-sid"})
-    llm = happy_llm.HappyBridgeLLM(
-        resolve_session=lambda override=None, focused=None: seen.setdefault("ov", override) or "sid",
-        send_and_wait=lambda sid, text: seen.setdefault("sid", sid),
-        fetch_last_reply=lambda sid: "ok",
-        summarize=lambda reply, req=None: "ok spoken",
-        session_override="forced-sid",
-        voice_state=state,
-    )
-    _collect(llm, _ctx("hi"))
-    assert seen["ov"] == "forced-sid"
