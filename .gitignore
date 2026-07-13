@@ -13,3 +13,9 @@ bin/livekit-server
 bin/*.tar.gz
 .agent-native/plans/*/.plan-url
 .agent-native/plans/*/.plan-state.json
+.gstack/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
