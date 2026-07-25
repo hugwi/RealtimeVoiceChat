@@ -1,0 +1,50 @@
+{
+  "name": "@voice-gateway/ui",
+  "version": "0.1.0",
+  "description": "Reusable Voice Gateway settings UI - React components + single-spa micro-frontend",
+  "type": "module",
+  "main": "dist/core/index.js",
+  "types": "dist/core/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/core/index.js",
+      "types": "./dist/core/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.js",
+      "types": "./dist/react/index.d.ts"
+    },
+    "./single-spa": {
+      "import": "./dist/single-spa/voice-settings.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "build:single-spa": "webpack --config single-spa/webpack.config.cjs",
+    "dev:single-spa": "webpack serve --config single-spa/webpack.config.cjs",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.0.0",
+    "webpack": "^5.88.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1",
+    "ts-loader": "^9.4.0",
+    "single-spa": "^5.9.4",
+    "vitest": "^0.34.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}

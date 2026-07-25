@@ -1,0 +1,27 @@
+[project]
+name = "livekit-acp-omnigent-prototype"
+version = "0.1.0"
+description = "LiveKit voice event gateway and ACP bridge for OmniGent"
+requires-python = ">=3.12"
+dependencies = [
+  "agent-client-protocol",
+  "httpx>=0.28,<1",
+  "keyring>=25,<26",
+  "omnigent>=0.6,<0.7",
+]
+
+[project.scripts]
+omnigent-acp-voice = "voice_bridge.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["voice_bridge"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/.codex-tmp",
+  "/dist",
+]

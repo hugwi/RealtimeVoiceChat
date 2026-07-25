@@ -1,0 +1,1 @@
+{"root":["../core/apiClient.ts","../core/index.ts","../core/types.ts","../react/ConnectionForm.tsx","../react/ConnectionList.tsx","../react/ConnectorList.tsx","../react/VoiceSession.tsx","../react/index.tsx","../single-spa/SettingsPage.tsx","../single-spa/index.tsx"],"version":"5.9.3"}

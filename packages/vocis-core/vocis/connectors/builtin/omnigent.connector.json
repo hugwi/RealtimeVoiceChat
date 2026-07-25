@@ -1,0 +1,43 @@
+{
+  "apiVersion": "voice-gateway/v1alpha1",
+  "kind": "AgentPlatformConnector",
+  "metadata": {
+    "id": "omnigent",
+    "displayName": "OmniGent",
+    "version": "0.1.0"
+  },
+  "runtime": {
+    "type": "executable",
+    "command": "omnigent-acp-voice",
+    "arguments": [],
+    "protocol": "acp",
+    "protocolVersion": 1
+  },
+  "capabilities": {
+    "sessionDiscovery": false,
+    "sessionHistory": false,
+    "streamingText": true,
+    "cancellation": true,
+    "permissions": true,
+    "backgroundTasks": true
+  },
+  "authentication": {
+    "methods": ["oauth-device", "bearer-token"],
+    "preferred": "oauth-device"
+  },
+  "configuration": {
+    "type": "object",
+    "required": ["serverUrl"],
+    "properties": {
+      "serverUrl": {
+        "type": "string",
+        "format": "uri",
+        "title": "OmniGent server URL"
+      },
+      "projectDirectory": {
+        "type": "string",
+        "title": "Default project directory"
+      }
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "apiVersion": "voice-gateway/v1alpha1",
+  "kind": "AgentPlatformConnector",
+  "metadata": {
+    "id": "generic-acp",
+    "displayName": "Generic ACP executable",
+    "version": "0.1.0"
+  },
+  "runtime": {
+    "type": "builtin",
+    "entrypoint": "generic-acp",
+    "protocol": "acp",
+    "protocolVersion": 1
+  },
+  "capabilities": {
+    "sessionDiscovery": false,
+    "sessionHistory": false,
+    "streamingText": true,
+    "cancellation": true,
+    "permissions": true,
+    "backgroundTasks": false
+  },
+  "authentication": {
+    "methods": ["none"],
+    "preferred": "none"
+  },
+  "configuration": {
+    "type": "object",
+    "required": ["command", "sessionId"],
+    "properties": {
+      "command": {
+        "type": "string",
+        "title": "ACP executable"
+      },
+      "arguments": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Executable arguments"
+      },
+      "sessionId": {
+        "type": "string",
+        "title": "Existing Agent Session id"
+      },
+      "workingDirectory": {
+        "type": "string",
+        "title": "Working directory"
+      }
+    }
+  }
+}

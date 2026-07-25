@@ -1,0 +1,13 @@
+{
+  "name": "vocis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Voice Gateway - platform-neutral voice-to-agent integration",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  }
+}

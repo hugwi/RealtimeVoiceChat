@@ -1,23 +1,48 @@
 # Agent Instructions
 
-## Tailscale And Happy Testing
+## Architecture
 
-- Assume the user is remote and connected through Tailscale.
-- Use `hyggan-system-product-name.tail19f0b5.ts.net` as the canonical host. The
-  current IPv4 fallback is `100.97.118.89`; verify it at runtime before use.
-- Keep the established endpoints stable: Happy dev Metro on `8088`, LiveKit on
-  `10000`, token service on `8443`, and room `voice`.
-- The Happy dev app connects to Metro at
-  `http://hyggan-system-product-name.tail19f0b5.ts.net:8088`. JS-only changes
-  require a reload, not an APK reinstall.
-- Preview and production are separate installed EAS builds. Keep them valid and
-  test the requested channel; they do not connect to Metro.
-- Use Tailscale Serve only, never Funnel. Verify routes report `tailnet only`.
+`ARCHITECTURE.md` is the source of truth for package structure, layers, module
+graph, design patterns, data flows, and security invariants. Keep it accurate
+when structure changes. `CONTEXT.md` holds the canonical domain language.
+`docs/omnigent.md` explains the OmniGent platform and how Vocis integrates.
 
-## Default Voice Test Profile
+## Progressive disclosure
 
-- Start a fresh `happy acp opencode` session for each acceptance test run.
-- Use a cheap or free OpenCode model in that session.
-- Keep the voice brain in `direct` mode unless specifically testing local or
-  cloud conversational routing.
-- Point `VOICE_SESSION_ID` at the newly created OpenCode ACP-backed Happy session.
+Task-specific instructions live in `.claude/skills/`, loaded on demand:
+
+| Skill | For |
+|-------|-----|
+| `voice-testing` | End-to-end voice pipeline testing |
+| `credential-grants` | OAuth device flow, keyring secrets, token lifecycle |
+| `livekit-ops` | LiveKit server, token service, agent worker operations |
+| `new-connector` | Adding a new Platform Connector (manifest + lifecycle + tests) |
+
+## Commands
+
+```bash
+npm install && cd packages/vocis-core && uv sync   # install
+npm test                                            # all tests
+cd packages/vocis-core && pytest                     # single package
+cd packages/vocis-ui && npm run typecheck            # type check
+```
+
+## Conventions
+
+- Reuse existing code, stdlib, native features, installed deps before adding.
+- Prefer deletion over addition. No new abstractions unprompted.
+- Simplification ceiling → brief `ponytail:` comment naming the tradeoff.
+- Map user synonyms to canonical terms silently; don't introduce new names.
+
+## Constraints
+
+- Secrets live in OS keyring only. Connection JSON rejects `token|secret|password|apikey|credential` keys.
+- Tailscale Serve only, never Funnel. Routes must report `tailnet only`.
+- Lower layers never import from higher layers (DAG — see ARCHITECTURE.md §7).
+
+## Task Tracking
+
+Beads database (`.beads/`) is the canonical task manager.
+`bd ready` / `bd list` / `bd show <id>` before starting.
+`bd update` / `bd note` / `bd close` as work progresses.
+Include bead IDs in handoffs. No parallel todo boards unless explicitly asked.
